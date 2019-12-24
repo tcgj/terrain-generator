@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-public class SimplexDensityGenerator : DensityGenerator {
+public class TerrainDensityGenerator : DensityGenerator {
 
     [Header("Noise Settings")]
     public int seed;
@@ -12,11 +12,17 @@ public class SimplexDensityGenerator : DensityGenerator {
     public float persistence = 0.5f;
     public float scale = 1f;
     public float weight = 1f;
-    public float surfaceOffset = 1f;
     public float weightMultiplier = 1f;
+
+    [Header("Terrain Settings")]
+    public float surfaceOffset = 1f;
     public float bedrockHeight;
     public float bedrockWeight;
-    public bool solidifyMesh;
+    public bool solidifyEdges;
+    public bool terraceEffect;
+    [Tooltip("X: Terrace Height. Y: Terrace Height")]
+    public Vector2 terraceValues = Vector2.one;
+
 
     public override ComputeBuffer Generate(ComputeBuffer vertexBuffer, int numVertsPerAxis, float chunkSize,
             float vertSpacing, Vector3 mapSize, Vector3 center, Vector3 offset) {
@@ -36,6 +42,7 @@ public class SimplexDensityGenerator : DensityGenerator {
         octaveOffsetBuffer.SetData(octaveOffsets);
         additionalBuffers.Add(octaveOffsetBuffer);
         densityShader.SetBuffer(kernelIndex, "octaveOffsetBuffer", octaveOffsetBuffer);
+        densityShader.SetVector("terracing", new Vector3(terraceValues.x, terraceValues.y, terraceEffect ? 1 : 0));
         densityShader.SetInt("numberOfOctaves", numberOfOctaves);
         densityShader.SetFloat("lacunarity", lacunarity);
         densityShader.SetFloat("persistence", persistence);
@@ -45,7 +52,7 @@ public class SimplexDensityGenerator : DensityGenerator {
         densityShader.SetFloat("surfaceOffset", surfaceOffset);
         densityShader.SetFloat("bedrockHeight", bedrockHeight);
         densityShader.SetFloat("bedrockWeight", bedrockWeight);
-        densityShader.SetBool("solidifyMesh", solidifyMesh);
+        densityShader.SetBool("solidifyEdges", solidifyEdges);
 
         return base.Generate(vertexBuffer, numVertsPerAxis, chunkSize, vertSpacing, mapSize, center, offset);
     }

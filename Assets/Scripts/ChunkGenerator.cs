@@ -19,16 +19,15 @@ public class ChunkGenerator : MonoBehaviour {
     public Vector3Int numberOfChunks = Vector3Int.one;
 
     [Header("Chunk Settings")]
-    [Range(-1, 1)]
     public float surfaceLevel;
     [Range(1, 16)]
     public float chunkSize = 1;
     public Vector3 densityOffset;
-    [Range(1, 32)]
+    [Range(1, 64)]
     public int resolution = 32;
 
     [Header("Gizmos")]
-    public bool drawChunkGizmos = false;
+    public bool drawChunkGizmos;
     public Color chunkGizmosColor = Color.white;
 
     // Chunk Data Structures
