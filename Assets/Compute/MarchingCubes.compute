@@ -9,7 +9,7 @@ struct Triangle {
     float3 c;
 };
 
-StructuredBuffer<float4> vertexBuffer;
+RWStructuredBuffer<float4> vertexBuffer;
 AppendStructuredBuffer<Triangle> triangleBuffer;
 
 int resolution;
@@ -20,9 +20,9 @@ float3 Lerp(float4 vertA, float4 vertB) {
     return vertA.xyz + t * (vertB.xyz - vertA.xyz);
 }
 
-int GetVertIndex(float x, float y, float z) {
-    int numVertPerAxis = resolution + 1;
-    return (x * numVertPerAxis + y) * numVertPerAxis + z;
+int GetVertIndex(int x, int y, int z) {
+    int numVertsPerAxis = resolution + 1;
+    return (x * numVertsPerAxis + y) * numVertsPerAxis + z;
 }
 
 [numthreads(numThreads, numThreads, numThreads)]

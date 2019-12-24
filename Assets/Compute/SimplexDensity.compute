@@ -1,0 +1,58 @@
+﻿#pragma kernel CalculateDensity
+#include "/Includes/Density.compute"
+#include "/Includes/SimplexNoise.compute"
+
+StructuredBuffer<float3> octaveOffsetBuffer;
+
+int numberOfOctaves;
+
+float lacunarity;
+float persistence;
+float scale;
+float weight;
+float surfaceOffset;
+float weightMultiplier;
+float bedrockHeight;
+float bedrockWeight;
+
+bool solidifyMesh;
+
+[numthreads(numThreads, numThreads, numThreads)]
+void CalculateDensity (int3 id : SV_DispatchThreadID) {
+    if (id.x >= numVertsPerAxis || id.y >= numVertsPerAxis || id.z >= numVertsPerAxis) {
+        return;
+    }
+
+    float3 position = id * vertSpacing + center - chunkSize / 2;
+
+    float density = 0;
+    float frequency = scale / 100;
+    float amplitude = 1;
+    float octaveWeight = 1;
+    for (int i = 0; i < numberOfOctaves; i++) {
+        float val = snoise(position * frequency + octaveOffsetBuffer[i] + offset);
+        val = 1 - abs(val);
+        val *= val;
+        val *= octaveWeight;
+        density += val * amplitude;
+
+        octaveWeight = max(min(val * weightMultiplier, 1), 0);
+        amplitude *= persistence;
+        frequency *= lacunarity;
+    }
+
+    density = -(position.y + surfaceOffset) + density * weight;
+
+    if (position.y < bedrockHeight) {
+        density += bedrockWeight;
+    }
+
+    if (solidifyMesh) {
+        float3 edgeOffset = abs(position * 2) - mapSize + vertSpacing / 2;
+        float edgeWeight = saturate(max(max(edgeOffset.x, edgeOffset.y), edgeOffset.z));
+        density = density * (1 - edgeWeight) - 100 * edgeWeight;
+    }
+
+    int index = GetVertIndex(id.x, id.y, id.z);
+    vertexBuffer[index] = float4(position, density);
+}

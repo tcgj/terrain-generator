@@ -5,14 +5,17 @@ using UnityEngine;
 [ExecuteAlways]
 public class ChunkGenerator : MonoBehaviour {
 
+    [Header("General Settings")]
+    public DensityGenerator densityGenerator;
     public Material material;
-    public ComputeShader computeShader;
+    public ComputeShader chunkShader;
     public bool editorAutoUpdate = true;
     public bool playingAutoUpdate = true;
     public bool generateColliders;
 
+
     [Header("Fixed Map Size Settings")]
-    public bool mapSizeRestricted;
+    public bool mapSizeFixed;
     public Vector3Int numberOfChunks = Vector3Int.one;
 
     [Header("Chunk Settings")]
@@ -46,7 +49,7 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void Awake() {
-        if (Application.isPlaying && !mapSizeRestricted) {
+        if (Application.isPlaying && !mapSizeFixed) {
             InitChunkDS();
 
             var existingChunks = FindObjectsOfType<Chunk>();
@@ -57,13 +60,14 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void Update() {
-        if (Application.isPlaying && !mapSizeRestricted) {
+        if (Application.isPlaying && !mapSizeFixed) {
             Run();
         }
 
-        if (settingsUpdated) {
+        if (settingsUpdated || densityGenerator.settingsUpdated) {
             RequestChunkUpdate();
             settingsUpdated = false;
+            densityGenerator.settingsUpdated = false;
         }
     }
 
@@ -74,7 +78,7 @@ public class ChunkGenerator : MonoBehaviour {
     public void Run() {
         InitBuffers();
 
-        if (mapSizeRestricted) {
+        if (mapSizeFixed) {
             InitChunks();
             UpdateAllChunks();
         } else {
@@ -100,35 +104,23 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     public void UpdateChunk(Chunk chunk) {
-        float pointSpacing = chunkSize / resolution;
-
+        int numVertsPerAxis = resolution + 1;
+        Vector3 mapSize = (Vector3)numberOfChunks * chunkSize;
+        float vertSpacing = chunkSize / resolution;
         Vector3Int position = chunk.position;
         Vector3 center = GetChunkCenterFromPosition(position);
 
         // Obtain density of each vertex
-        int numPointsPerAxis = resolution + 1;
-        Vector4[] vertexList = new Vector4[numPointsPerAxis * numPointsPerAxis * numPointsPerAxis];
-        for (int x = 0; x < numPointsPerAxis; x++) {
-            for (int y = 0; y < numPointsPerAxis; y++) {
-                for (int z = 0; z < numPointsPerAxis; z++) {
-                    Vector3 vertexPos = new Vector3(x, y, z) * pointSpacing + center - Vector3.one * chunkSize / 2;
-                    int index = (x * numPointsPerAxis + y) * numPointsPerAxis + z;
-                    float w = GetIsoValue(vertexPos);
-
-                    vertexList[index] = new Vector4(vertexPos.x, vertexPos.y, vertexPos.z, w);
-                }
-            }
-        }
+        densityGenerator.Generate(vertexBuffer, numVertsPerAxis, chunkSize, vertSpacing, mapSize, center, densityOffset);
 
         // Set up compute shader
-        int kernelIndex = computeShader.FindKernel("CubeMarch");
-        vertexBuffer.SetData(vertexList);
+        int kernelIndex = chunkShader.FindKernel("CubeMarch");
         triangleBuffer.SetCounterValue(0);
-        computeShader.SetBuffer(kernelIndex, "vertexBuffer", vertexBuffer);
-        computeShader.SetBuffer(kernelIndex, "triangleBuffer", triangleBuffer);
-        computeShader.SetInt("resolution", resolution);
-        computeShader.SetFloat("surfaceLevel", surfaceLevel);
-        computeShader.Dispatch(kernelIndex, 8, 8, 8);
+        chunkShader.SetBuffer(kernelIndex, "vertexBuffer", vertexBuffer);
+        chunkShader.SetBuffer(kernelIndex, "triangleBuffer", triangleBuffer);
+        chunkShader.SetInt("resolution", resolution);
+        chunkShader.SetFloat("surfaceLevel", surfaceLevel);
+        chunkShader.Dispatch(kernelIndex, 8, 8, 8);
 
         // Obtain compute shader result
         int[] numTriangleOut = { 0 };
@@ -165,7 +157,7 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     Vector3 GetChunkCenterFromPosition(Vector3Int position) {
-        if (!mapSizeRestricted) {
+        if (!mapSizeFixed) {
             return (Vector3)position * chunkSize;
         }
 
@@ -180,8 +172,8 @@ public class ChunkGenerator : MonoBehaviour {
 
     void InitBuffers() {
         // Values per chunk
-        int numVertsPerEdge = resolution + 1;
-        int numVerts = numVertsPerEdge * numVertsPerEdge * numVertsPerEdge;
+        int numVertsPerAxis = resolution + 1;
+        int numVerts = numVertsPerAxis * numVertsPerAxis * numVertsPerAxis;
         int numVoxels = resolution * resolution * resolution;
         int maxTriangleCount = numVoxels * 5;
 
@@ -258,11 +250,5 @@ public class ChunkGenerator : MonoBehaviour {
                 Gizmos.DrawWireCube(chunkCenter, Vector3.one * chunkSize);
             }
         }
-    }
-
-    // Temp
-    float GetIsoValue(Vector3 pos) {
-        float result = -pos.y + Noise.Evaluate(pos.x, pos.y, pos.z);
-        return result;
     }
 }
