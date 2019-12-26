@@ -24,6 +24,7 @@ void CalculateDensity (int3 id : SV_DispatchThreadID) {
         return;
     }
 
+    // position of current vertex in world space
     float3 position = id * vertSpacing + center - chunkSize / 2;
 
     // Generate noise
@@ -58,9 +59,12 @@ void CalculateDensity (int3 id : SV_DispatchThreadID) {
 
     // Close mesh edges
     if (solidifyEdges) {
-        float3 edgeOffset = abs(position * 2) - mapSize + vertSpacing / 2;
-        float edgeWeight = saturate(max(max(edgeOffset.x, edgeOffset.y), edgeOffset.z));
-        density = density * (1 - edgeWeight) - 100 * edgeWeight;
+        float3 edgeOffset = abs(position) - mapSize / 2;
+        // if current vertex is at chunk boundary, aka non-negative edge offset
+        // then turn into air
+        if (!all(edgeOffset)) {
+            density = -100;
+        }
     }
 
     int index = GetVertIndex(id.x, id.y, id.z);

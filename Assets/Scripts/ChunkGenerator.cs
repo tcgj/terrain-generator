@@ -13,15 +13,14 @@ public class ChunkGenerator : MonoBehaviour {
     public bool playingAutoUpdate = true;
     public bool generateColliders;
 
-
     [Header("Fixed Map Size Settings")]
     public bool mapSizeFixed;
     public Vector3Int numberOfChunks = Vector3Int.one;
 
     [Header("Chunk Settings")]
     public float surfaceLevel;
-    [Range(1, 16)]
-    public float chunkSize = 1;
+    [Range(1, 64)]
+    public float chunkSize = 1f;
     public Vector3 densityOffset;
     [Range(1, 64)]
     public int resolution = 32;
@@ -162,7 +161,7 @@ public class ChunkGenerator : MonoBehaviour {
 
         // If on restricted map size, center is "origin"
         Vector3 mapSize = (Vector3)numberOfChunks * chunkSize;
-        return (Vector3)position * chunkSize + Vector3.one * chunkSize / 2 - mapSize / 2;
+        return (Vector3)position * chunkSize + Vector3.one * chunkSize / 2f - mapSize / 2f;
     }
 
     void InitChunkDS() {
