@@ -20,8 +20,10 @@ public class TerrainDensityGenerator : DensityGenerator {
     public float bedrockWeight;
     public bool solidifyEdges;
     public bool terraceEffect;
-    [Tooltip("X: Terrace Height. Y: Terrace Height")]
-    public Vector2 terraceValues = Vector2.one;
+    [ConditionalHide("terraceEffect", true)]
+    public float terraceHeight = 1f;
+    [ConditionalHide("terraceEffect", true)]
+    public float terraceWeight = 1f;
 
 
     public override ComputeBuffer Generate(ComputeBuffer vertexBuffer, int numVertsPerAxis, float chunkSize,
@@ -42,7 +44,7 @@ public class TerrainDensityGenerator : DensityGenerator {
         octaveOffsetBuffer.SetData(octaveOffsets);
         additionalBuffers.Add(octaveOffsetBuffer);
         densityShader.SetBuffer(kernelIndex, "octaveOffsetBuffer", octaveOffsetBuffer);
-        densityShader.SetVector("terracing", new Vector3(terraceValues.x, terraceValues.y, terraceEffect ? 1 : 0));
+        densityShader.SetVector("terracing", new Vector3(terraceHeight, terraceWeight, terraceEffect ? 1 : 0));
         densityShader.SetInt("numberOfOctaves", numberOfOctaves);
         densityShader.SetFloat("lacunarity", lacunarity);
         densityShader.SetFloat("persistence", persistence);

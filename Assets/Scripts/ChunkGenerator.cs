@@ -15,6 +15,7 @@ public class ChunkGenerator : MonoBehaviour {
 
     [Header("Fixed Map Size Settings")]
     public bool mapSizeFixed;
+    [ConditionalHide("mapSizeFixed", true)]
     public Vector3Int numberOfChunks = Vector3Int.one;
 
     [Header("Chunk Settings")]
@@ -27,6 +28,7 @@ public class ChunkGenerator : MonoBehaviour {
 
     [Header("Gizmos")]
     public bool drawChunkGizmos;
+    [ConditionalHide("drawChunkGizmos", true)]
     public Color chunkGizmosColor = Color.white;
 
     // Chunk Data Structures
@@ -58,60 +60,50 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void Update() {
-        if (Application.isPlaying && !mapSizeFixed) {
+        if (Application.isPlaying && !mapSizeFixed) { // Playing on open world
             Run();
-        }
-
-        if (settingsUpdated || densityGenerator.settingsUpdated) {
-            RequestChunkUpdate();
+        } else if (settingsUpdated || densityGenerator.settingsUpdated) { // Settings were updated
+            if ((Application.isPlaying && playingAutoUpdate) || (!Application.isPlaying && editorAutoUpdate)) {
+                Run();
+            }
             settingsUpdated = false;
             densityGenerator.settingsUpdated = false;
         }
     }
 
-    void OnDestroy() {
-        ReleaseBuffers();
-    }
-
-    public void Run() {
+    void Run() {
         InitBuffers();
 
         if (mapSizeFixed) {
             InitChunks();
             UpdateAllChunks();
-        } else {
-            if (Application.isPlaying) {
-                // Initialise only those visible ones
-            }
+        } else if (Application.isPlaying) {
+            // Initialise only those visible ones
         }
         if (!Application.isPlaying) {
             ReleaseBuffers();
         }
     }
 
-    public void RequestChunkUpdate() {
-        if ((Application.isPlaying && playingAutoUpdate) || (!Application.isPlaying && editorAutoUpdate)) {
-            Run();
-        }
-    }
-
-    public void UpdateAllChunks() {
+    void UpdateAllChunks() {
         foreach (Chunk chunk in chunks) {
             UpdateChunk(chunk);
         }
     }
 
-    public void UpdateChunk(Chunk chunk) {
+    void UpdateChunk(Chunk chunk) {
         int numVertsPerAxis = resolution + 1;
         Vector3 mapSize = (Vector3)numberOfChunks * chunkSize;
         float vertSpacing = chunkSize / resolution;
         Vector3Int position = chunk.position;
         Vector3 center = GetChunkCenterFromPosition(position);
 
-        // Obtain density of each vertex
+        // Generate vertex density values
         densityGenerator.Generate(vertexBuffer, numVertsPerAxis, chunkSize, vertSpacing, mapSize, center, densityOffset);
 
-        // Set up compute shader
+        // Set up compute shader for contouring
+        // Currently uses Marching Cubes kernel
+        // Perhaps after implementing alternative contouring techniques this can be made into a setting
         int kernelIndex = chunkShader.FindKernel("CubeMarch");
         triangleBuffer.SetCounterValue(0);
         chunkShader.SetBuffer(kernelIndex, "vertexBuffer", vertexBuffer);
@@ -120,7 +112,7 @@ public class ChunkGenerator : MonoBehaviour {
         chunkShader.SetFloat("surfaceLevel", surfaceLevel);
         chunkShader.Dispatch(kernelIndex, 8, 8, 8);
 
-        // Obtain compute shader result
+        // Obtain vertex result
         int[] numTriangleOut = { 0 };
         ComputeBuffer.CopyCount(triangleBuffer, numTriangleBuffer, 0);
         numTriangleBuffer.GetData(numTriangleOut);
@@ -135,9 +127,10 @@ public class ChunkGenerator : MonoBehaviour {
         int[] triangles = new int[numTriangles * 3];
 
         for (int triIndex = 0; triIndex < numTriangles; triIndex++) {
-            for (int vertIndex = 0; vertIndex < 3; vertIndex++) {
-                vertices[triIndex * 3 + vertIndex] = triangleList[triIndex][vertIndex];
-                triangles[triIndex * 3 + vertIndex] = triIndex * 3 + vertIndex;
+            for (int cornerIndex = 0; cornerIndex < 3; cornerIndex++) {
+                int vertIndex = triIndex * 3 + cornerIndex;
+                vertices[vertIndex] = triangleList[triIndex][cornerIndex];
+                triangles[vertIndex] = vertIndex;
             }
         }
 
@@ -147,6 +140,7 @@ public class ChunkGenerator : MonoBehaviour {
         mesh.RecalculateNormals();
     }
 
+    // If container exists, re-obtain reference. Otherwise, create it.
     void GetChunkContainer() {
         chunkContainer = GameObject.Find(chunkContainerName);
         if (chunkContainer == null) {
@@ -238,6 +232,10 @@ public class ChunkGenerator : MonoBehaviour {
         if (numTriangleBuffer != null) {
             numTriangleBuffer.Release();
         }
+    }
+
+    void OnDestroy() {
+        ReleaseBuffers();
     }
 
     void OnDrawGizmos() {
