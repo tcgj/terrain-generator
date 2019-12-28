@@ -1,5 +1,4 @@
-﻿using System.Collections;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 
 public class TerrainDensityGenerator : DensityGenerator {
@@ -20,11 +19,10 @@ public class TerrainDensityGenerator : DensityGenerator {
     public float bedrockWeight;
     public bool solidifyEdges;
     public bool terraceEffect;
-    [ConditionalHide("terraceEffect", true)]
+    [ConditionalHide(nameof(terraceEffect), true, true)]
     public float terraceHeight = 1f;
-    [ConditionalHide("terraceEffect", true)]
+    [ConditionalHide(nameof(terraceEffect), true, true)]
     public float terraceWeight = 1f;
-
 
     public override ComputeBuffer Generate(ComputeBuffer vertexBuffer, int numVertsPerAxis, float chunkSize,
             float vertSpacing, Vector3 mapSize, Vector3 center, Vector3 offset) {

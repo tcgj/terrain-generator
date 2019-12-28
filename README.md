@@ -1,5 +1,5 @@
 # Procedural Terrain Generator
-A procedural terrain generator based on 3d contouring. Currently uses the marching cubes algorithm.
+A procedural terrain generator based on isosurface extraction. Currently uses the marching cubes algorithm.
 
 Written in Unity 2019.2.15f1.
 

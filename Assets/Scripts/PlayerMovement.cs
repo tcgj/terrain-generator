@@ -6,7 +6,6 @@ By cranky
 Modified by tcgj for use with Unity 2019's new InputSystem.
 */
 
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;

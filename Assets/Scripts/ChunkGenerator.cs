@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -10,25 +9,28 @@ public class ChunkGenerator : MonoBehaviour {
     public Material material;
     public ComputeShader chunkShader;
     public bool editorAutoUpdate = true;
-    public bool playingAutoUpdate = true;
     public bool generateColliders;
+    public Transform viewer;
+    public float viewDistance = 500;
 
     [Header("Fixed Map Size Settings")]
     public bool mapSizeFixed;
-    [ConditionalHide("mapSizeFixed", true)]
+    [ConditionalHide(nameof(mapSizeFixed), true, true)]
     public Vector3Int numberOfChunks = Vector3Int.one;
 
     [Header("Chunk Settings")]
     public float surfaceLevel;
-    [Range(1, 64)]
-    public float chunkSize = 1f;
+    [Range(2, 64)]
+    public int chunkSize = 2; // At highest detail
     public Vector3 densityOffset;
     [Range(1, 64)]
     public int resolution = 32;
+    [Range(0, 9)]
+    public int levelsOfDetail = 4;
 
     [Header("Gizmos")]
     public bool drawChunkGizmos;
-    [ConditionalHide("drawChunkGizmos", true)]
+    [ConditionalHide(nameof(drawChunkGizmos), true, true)]
     public Color chunkGizmosColor = Color.white;
 
     // Chunk Data Structures
@@ -60,10 +62,10 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void Update() {
-        if (Application.isPlaying && !mapSizeFixed) { // Playing on open world
-            Run();
+        if (Application.isPlaying) { // Playing
+            // Run();
         } else if (settingsUpdated || densityGenerator.settingsUpdated) { // Settings were updated
-            if ((Application.isPlaying && playingAutoUpdate) || (!Application.isPlaying && editorAutoUpdate)) {
+            if (!Application.isPlaying && editorAutoUpdate) {
                 Run();
             }
             settingsUpdated = false;
@@ -92,19 +94,31 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void UpdateChunk(Chunk chunk) {
+        // Determine level of detail
+        float rootTwo = 1.42f;
+        if (chunk.lod > 0 && chunk.WithinRadius(viewer.position, rootTwo * chunk.size / 2)) {
+            if (chunk.children[0] == null) {
+                chunk.Split();
+            }
+            foreach (Chunk child in chunk.children) {
+                UpdateChunk(child);
+            }
+            return;
+        }
+
         int numVertsPerAxis = resolution + 1;
-        Vector3 mapSize = (Vector3)numberOfChunks * chunkSize;
-        float vertSpacing = chunkSize / resolution;
+        // Only used for fixed map size. otherwise not used
+        Vector3 mapSize = (Vector3)numberOfChunks * (chunkSize << levelsOfDetail);
+        float vertSpacing = (float)chunk.size / resolution;
         Vector3Int position = chunk.position;
         Vector3 center = GetChunkCenterFromPosition(position);
 
         // Generate vertex density values
-        densityGenerator.Generate(vertexBuffer, numVertsPerAxis, chunkSize, vertSpacing, mapSize, center, densityOffset);
+        densityGenerator.Generate(vertexBuffer, numVertsPerAxis, chunk.size, vertSpacing, mapSize, center, densityOffset);
 
         // Set up compute shader for contouring
-        // Currently uses Marching Cubes kernel
-        // Perhaps after implementing alternative contouring techniques this can be made into a setting
-        int kernelIndex = chunkShader.FindKernel("CubeMarch");
+        // Currently uses Marching Cubes shader
+        int kernelIndex = chunkShader.FindKernel("Contour");
         triangleBuffer.SetCounterValue(0);
         chunkShader.SetBuffer(kernelIndex, "vertexBuffer", vertexBuffer);
         chunkShader.SetBuffer(kernelIndex, "triangleBuffer", triangleBuffer);
@@ -133,6 +147,9 @@ public class ChunkGenerator : MonoBehaviour {
                 triangles[vertIndex] = vertIndex;
             }
         }
+        if (chunk.lod == 3) {
+            Debug.Log(numTriangles);
+        }
 
         mesh.Clear();
         mesh.vertices = vertices;
@@ -149,13 +166,7 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     Vector3 GetChunkCenterFromPosition(Vector3Int position) {
-        if (!mapSizeFixed) {
-            return (Vector3)position * chunkSize;
-        }
-
-        // If on restricted map size, center is "origin"
-        Vector3 mapSize = (Vector3)numberOfChunks * chunkSize;
-        return (Vector3)position * chunkSize + Vector3.one * chunkSize / 2f - mapSize / 2f;
+        return (Vector3)position;
     }
 
     void InitChunkDS() {
@@ -186,30 +197,19 @@ public class ChunkGenerator : MonoBehaviour {
     void InitChunks() {
         GetChunkContainer();
         chunks = new List<Chunk>();
-        Dictionary<Vector3Int, Chunk> oldChunks = new Dictionary<Vector3Int, Chunk>();
         foreach (Chunk chunk in FindObjectsOfType<Chunk>()) {
-            oldChunks.Add(chunk.position, chunk);
+            chunk.DestroyChunk();
         }
         for (int x = 0; x < numberOfChunks.x; x++) {
             for (int y = 0; y < numberOfChunks.y; y++) {
                 for (int z = 0; z < numberOfChunks.z; z++) {
-                    Vector3Int position = new Vector3Int(x, y, z);
+                    Vector3Int position = new Vector3Int(x, y, z) * (chunkSize << levelsOfDetail);
                     Chunk chunkToAdd;
-                    if (oldChunks.ContainsKey(position)) {
-                        chunkToAdd = oldChunks[position];
-                        oldChunks.Remove(position);
-                    } else {
-                        chunkToAdd = CreateChunk(position);
-                    }
-
+                    chunkToAdd = CreateChunk(position);
                     chunkToAdd.InitializeMesh(material, generateColliders);
                     chunks.Add(chunkToAdd);
                 }
             }
-        }
-
-        foreach (Chunk chunk in oldChunks.Values) {
-            chunk.DestroyChunk();
         }
     }
 
@@ -217,6 +217,8 @@ public class ChunkGenerator : MonoBehaviour {
         GameObject chunkObj = new GameObject($"Chunk@({position.x}, {position.y}, {position.z})");
         chunkObj.transform.parent = chunkContainer.transform;
         Chunk chunk = chunkObj.AddComponent<Chunk>();
+        chunk.lod = levelsOfDetail;
+        chunk.size = chunkSize << levelsOfDetail;
         chunk.position = position;
 
         return chunk;
@@ -241,10 +243,20 @@ public class ChunkGenerator : MonoBehaviour {
     void OnDrawGizmos() {
         if (drawChunkGizmos) {
             foreach (Chunk chunk in chunks) {
-                Vector3 chunkCenter = GetChunkCenterFromPosition(chunk.position);
-                Gizmos.color = chunkGizmosColor;
-                Gizmos.DrawWireCube(chunkCenter, Vector3.one * chunkSize);
+                DrawChunkBoundaries(chunk);
             }
+        }
+    }
+
+    void DrawChunkBoundaries(Chunk chunk) {
+        if (chunk.children[0] != null) {
+            foreach (Chunk child in chunk.children) {
+                DrawChunkBoundaries(child);
+            }
+        } else {
+            Vector3 chunkCenter = GetChunkCenterFromPosition(chunk.position);
+            Gizmos.color = chunkGizmosColor;
+            Gizmos.DrawWireCube(chunkCenter, Vector3.one * chunk.size);
         }
     }
 }

@@ -16,7 +16,6 @@ public abstract class DensityGenerator : MonoBehaviour {
         settingsUpdated = true;
     }
 
-    // Partial method. Overriding method needs to populate vertexBuffer with x,y,z,w values and call this method.
     public virtual ComputeBuffer Generate(ComputeBuffer vertexBuffer, int numVertsPerAxis, float chunkSize,
             float vertSpacing, Vector3 mapSize, Vector3 center, Vector3 offset) {
         int numThreadsPerAxis = Mathf.CeilToInt((float)numVertsPerAxis / threadGroupsPerAxis);

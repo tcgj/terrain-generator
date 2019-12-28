@@ -1,6 +1,4 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+﻿using UnityEngine;
 using UnityEditor;
 
 [CustomPropertyDrawer(typeof(ConditionalHideAttribute))]
@@ -41,7 +39,7 @@ public class ConditionalHidePropertyDrawer : PropertyDrawer {
             if (controlAttribute.enumCondition != -1) {
                 enabled = controlProperty.enumValueIndex == controlAttribute.enumCondition;
             } else {
-                enabled = controlProperty.boolValue;
+                enabled = controlAttribute.enableWhenTrue == controlProperty.boolValue;
             }
         } else {
             Debug.LogWarning("Attempting to use a ConditionalHideAttribute but no matching SourcePropertyValue found in object: " + controlAttribute.controlField);
