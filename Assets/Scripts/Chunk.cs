@@ -7,6 +7,8 @@ public class Chunk : MonoBehaviour {
     [HideInInspector]
     public Mesh mesh;
     [HideInInspector]
+    public bool dirty = true;
+    [HideInInspector]
     public float[] densities;
 
     // LOD
@@ -15,7 +17,7 @@ public class Chunk : MonoBehaviour {
     [HideInInspector]
     public int size;
     [HideInInspector]
-    public Chunk[] children = new Chunk[8];
+    public Chunk[] children;
 
     // Mesh
     bool hasCollider;
@@ -23,16 +25,12 @@ public class Chunk : MonoBehaviour {
     MeshRenderer meshRenderer;
     MeshCollider meshCollider;
 
-    public void DestroyChunk() {
-        foreach (Chunk child in children) {
-            if (child != null) {
-                child.DestroyChunk();
-            }
-        }
+    public void DestroySelf() {
         if (Application.isPlaying) {
             mesh.Clear();
             Destroy(gameObject);
         } else {
+            // For garbage collection in editor
             DestroyImmediate(gameObject, false);
         }
     }
@@ -63,25 +61,32 @@ public class Chunk : MonoBehaviour {
         }
 
         meshRenderer.material = mat;
+    }
 
+    public void UpdateCollider() {
         if (hasCollider) {
-            // force update
-            meshCollider.sharedMesh = null;
             meshCollider.sharedMesh = mesh;
         }
     }
 
     public bool WithinRadius(Vector3 viewerPos, float radius) {
-        if (Vector3.Distance(viewerPos, position) < radius + size / 2f) {
-            return true;
+        float halfLength = size / 2f;
+        if (viewerPos.x - radius > position.x + halfLength || viewerPos.x + radius < position.x - halfLength
+                || viewerPos.y - radius > position.y + halfLength || viewerPos.y + radius < position.y - halfLength
+                || viewerPos.z - radius > position.z + halfLength || viewerPos.z + radius < position.z - halfLength) {
+            return false;
         }
-        return false;
+        return true;
     }
 
     public void Split() {
+        if (children == null) {
+            children = new Chunk[8];
+        }
+
         int childSize = size / 2;
         for (int i = 0; i < 8; i++) {
-            GameObject chunkChild = new GameObject(gameObject.name + $"#child{i}");
+            GameObject chunkChild = new GameObject($"child{i}");
             chunkChild.transform.parent = transform;
             children[i] = chunkChild.AddComponent<Chunk>();
             children[i].size = childSize;
@@ -97,5 +102,18 @@ public class Chunk : MonoBehaviour {
         children[5].position = new Vector3Int(position.x + childHalfLength, position.y - childHalfLength, position.z - childHalfLength);
         children[6].position = new Vector3Int(position.x - childHalfLength, position.y - childHalfLength, position.z - childHalfLength);
         children[7].position = new Vector3Int(position.x - childHalfLength, position.y - childHalfLength, position.z + childHalfLength);
+    }
+
+    public void Merge() {
+        if (children == null) {
+            return;
+        }
+
+        foreach (Chunk child in children) {
+            child.Merge();
+            child.DestroySelf();
+        }
+        children = null;
+        dirty = true;
     }
 }

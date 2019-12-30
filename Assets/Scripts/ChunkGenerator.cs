@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-[ExecuteAlways]
+[ExecuteInEditMode]
 public class ChunkGenerator : MonoBehaviour {
 
     [Header("General Settings")]
@@ -56,16 +56,21 @@ public class ChunkGenerator : MonoBehaviour {
 
             var existingChunks = FindObjectsOfType<Chunk>();
             foreach (Chunk chunk in existingChunks) {
-                chunk.DestroyChunk();
+                chunk.DestroySelf();
             }
         }
     }
 
+    void Start() {
+        InitChunks();
+    }
+
     void Update() {
         if (Application.isPlaying) { // Playing
-            // Run();
+            Run();
         } else if (settingsUpdated || densityGenerator.settingsUpdated) { // Settings were updated
             if (!Application.isPlaying && editorAutoUpdate) {
+                InitChunks();
                 Run();
             }
             settingsUpdated = false;
@@ -77,7 +82,6 @@ public class ChunkGenerator : MonoBehaviour {
         InitBuffers();
 
         if (mapSizeFixed) {
-            InitChunks();
             UpdateAllChunks();
         } else if (Application.isPlaying) {
             // Initialise only those visible ones
@@ -94,21 +98,30 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void UpdateChunk(Chunk chunk) {
-        // Determine level of detail
-        float rootTwo = 1.42f;
-        if (chunk.lod > 0 && chunk.WithinRadius(viewer.position, rootTwo * chunk.size / 2)) {
-            if (chunk.children[0] == null) {
-                chunk.Split();
+        // Determine if chunk should be at maximum detail
+        if (chunk.WithinRadius(viewer.position, viewDistance)) {
+            // is chunk already at max subdivision
+            if (chunk.lod > 0) {
+                if (chunk.children == null) {
+                    chunk.Split();
+                    chunk.mesh.Clear();
+                }
+                foreach (Chunk child in chunk.children) {
+                    UpdateChunk(child);
+                }
+                return;
             }
-            foreach (Chunk child in chunk.children) {
-                UpdateChunk(child);
-            }
+        } else {
+            chunk.Merge();
+        }
+
+        // Only render if any changes are made to the chunk
+        if (!chunk.dirty) {
             return;
         }
 
         int numVertsPerAxis = resolution + 1;
-        // Only used for fixed map size. otherwise not used
-        Vector3 mapSize = (Vector3)numberOfChunks * (chunkSize << levelsOfDetail);
+        Vector3 mapSize = (Vector3)numberOfChunks * (chunkSize << levelsOfDetail); // Only used for "edge solidification".
         float vertSpacing = (float)chunk.size / resolution;
         Vector3Int position = chunk.position;
         Vector3 center = GetChunkCenterFromPosition(position);
@@ -124,7 +137,7 @@ public class ChunkGenerator : MonoBehaviour {
         chunkShader.SetBuffer(kernelIndex, "triangleBuffer", triangleBuffer);
         chunkShader.SetInt("resolution", resolution);
         chunkShader.SetFloat("surfaceLevel", surfaceLevel);
-        chunkShader.Dispatch(kernelIndex, 8, 8, 8);
+        chunkShader.Dispatch(kernelIndex, resolution, resolution, resolution);
 
         // Obtain vertex result
         int[] numTriangleOut = { 0 };
@@ -147,14 +160,13 @@ public class ChunkGenerator : MonoBehaviour {
                 triangles[vertIndex] = vertIndex;
             }
         }
-        if (chunk.lod == 3) {
-            Debug.Log(numTriangles);
-        }
 
         mesh.Clear();
         mesh.vertices = vertices;
         mesh.triangles = triangles;
         mesh.RecalculateNormals();
+        chunk.dirty = false;
+        chunk.UpdateCollider();
     }
 
     // If container exists, re-obtain reference. Otherwise, create it.
@@ -198,7 +210,7 @@ public class ChunkGenerator : MonoBehaviour {
         GetChunkContainer();
         chunks = new List<Chunk>();
         foreach (Chunk chunk in FindObjectsOfType<Chunk>()) {
-            chunk.DestroyChunk();
+            chunk.DestroySelf();
         }
         for (int x = 0; x < numberOfChunks.x; x++) {
             for (int y = 0; y < numberOfChunks.y; y++) {
@@ -249,7 +261,7 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void DrawChunkBoundaries(Chunk chunk) {
-        if (chunk.children[0] != null) {
+        if (chunk.children != null) {
             foreach (Chunk child in chunk.children) {
                 DrawChunkBoundaries(child);
             }
