@@ -137,7 +137,7 @@ public class ChunkGenerator : MonoBehaviour {
         chunkShader.SetBuffer(kernelIndex, "triangleBuffer", triangleBuffer);
         chunkShader.SetInt("resolution", resolution);
         chunkShader.SetFloat("surfaceLevel", surfaceLevel);
-        chunkShader.Dispatch(kernelIndex, resolution, resolution, resolution);
+        chunkShader.Dispatch(kernelIndex, 8, 8, 8);
 
         // Obtain vertex result
         int[] numTriangleOut = { 0 };
