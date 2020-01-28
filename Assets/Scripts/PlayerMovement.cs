@@ -99,7 +99,6 @@ public class PlayerMovement : MonoBehaviour {
 
         // do our calculations so we don't have to do them every frame
         CapsuleCollider capsule = (CapsuleCollider)coll;
-        Debug.Log(capsule);
         halfPlayerHeight = capsule.height * 0.5f;
         fudgeCheck = halfPlayerHeight + FudgeExtra;
         bottomCapsuleSphereOrigin = halfPlayerHeight - capsule.radius;

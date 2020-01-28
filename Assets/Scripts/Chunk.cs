@@ -61,6 +61,7 @@ public class Chunk : MonoBehaviour {
         }
 
         meshRenderer.material = mat;
+        meshCollider.sharedMesh = mesh;
     }
 
     public void UpdateCollider() {
@@ -115,5 +116,9 @@ public class Chunk : MonoBehaviour {
         }
         children = null;
         dirty = true;
+    }
+
+    public bool IsDestroyed() {
+        return gameObject == null;
     }
 }

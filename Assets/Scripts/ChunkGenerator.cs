@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using Unity.Jobs;
+using Unity.Collections;
 using UnityEngine;
 
 [ExecuteInEditMode]
@@ -7,7 +9,6 @@ public class ChunkGenerator : MonoBehaviour {
     [Header("General Settings")]
     public DensityGenerator densityGenerator;
     public Material material;
-    public ComputeShader chunkShader;
     public bool editorAutoUpdate = true;
     public bool generateColliders;
     public Transform viewer;
@@ -37,11 +38,7 @@ public class ChunkGenerator : MonoBehaviour {
     string chunkContainerName = "Chunk Container";
     GameObject chunkContainer;
     List<Chunk> chunks;
-
-    // Compute Buffers
-    ComputeBuffer vertexBuffer;
-    ComputeBuffer triangleBuffer;
-    ComputeBuffer numTriangleBuffer;
+    Queue<JobData> jobQueue;
 
     // Flags
     bool settingsUpdated;
@@ -51,9 +48,8 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void Awake() {
+        InitChunkDS();
         if (Application.isPlaying && !mapSizeFixed) {
-            InitChunkDS();
-
             var existingChunks = FindObjectsOfType<Chunk>();
             foreach (Chunk chunk in existingChunks) {
                 chunk.DestroySelf();
@@ -79,25 +75,30 @@ public class ChunkGenerator : MonoBehaviour {
     }
 
     void Run() {
-        InitBuffers();
-
         if (mapSizeFixed) {
             UpdateAllChunks();
         } else if (Application.isPlaying) {
             // Initialise only those visible ones
         }
-        if (!Application.isPlaying) {
-            ReleaseBuffers();
+
+        int jobCount = jobQueue.Count;
+        for (int i = 0; i < jobCount; i++) {
+            JobData jobData = jobQueue.Dequeue();
+            if (jobData.jobHandle.IsCompleted) {
+                UpdateChunkMesh(jobData);
+            } else {
+                jobQueue.Enqueue(jobData);
+            }
         }
     }
 
     void UpdateAllChunks() {
         foreach (Chunk chunk in chunks) {
-            UpdateChunk(chunk);
+            RequestUpdateChunk(chunk);
         }
     }
 
-    void UpdateChunk(Chunk chunk) {
+    void RequestUpdateChunk(Chunk chunk) {
         // Determine if chunk should be at maximum detail
         if (chunk.WithinRadius(viewer.position, viewDistance)) {
             // is chunk already at max subdivision
@@ -107,7 +108,7 @@ public class ChunkGenerator : MonoBehaviour {
                     chunk.mesh.Clear();
                 }
                 foreach (Chunk child in chunk.children) {
-                    UpdateChunk(child);
+                    RequestUpdateChunk(child);
                 }
                 return;
             }
@@ -121,52 +122,57 @@ public class ChunkGenerator : MonoBehaviour {
         }
 
         int numVertsPerAxis = resolution + 1;
+        int numVerts = numVertsPerAxis * numVertsPerAxis * numVertsPerAxis;
+        int numVoxels = resolution * resolution * resolution;
         Vector3 mapSize = (Vector3)numberOfChunks * (chunkSize << levelsOfDetail); // Only used for "edge solidification".
         float vertSpacing = (float)chunk.size / resolution;
-        Vector3Int position = chunk.position;
-        Vector3 center = GetChunkCenterFromPosition(position);
+        Vector3 center = chunk.position;
+
+        var vertexBuffer = new NativeArray<Vector3>(numVerts, Allocator.TempJob);
+        var densityBuffer = new NativeArray<float>(numVerts, Allocator.TempJob);
+        var triangleBuffer = new NativeQueue<Triangle>(Allocator.TempJob);
 
         // Generate vertex density values
-        densityGenerator.Generate(vertexBuffer, numVertsPerAxis, chunk.size, vertSpacing, mapSize, center, densityOffset);
+        JobHandle densityJobHandle = densityGenerator.Generate(vertexBuffer, densityBuffer, numVertsPerAxis, chunk.size,
+                vertSpacing, mapSize, center, densityOffset);
 
-        // Set up compute shader for contouring
-        // Currently uses Marching Cubes shader
-        int kernelIndex = chunkShader.FindKernel("Contour");
-        triangleBuffer.SetCounterValue(0);
-        chunkShader.SetBuffer(kernelIndex, "vertexBuffer", vertexBuffer);
-        chunkShader.SetBuffer(kernelIndex, "triangleBuffer", triangleBuffer);
-        chunkShader.SetInt("resolution", resolution);
-        chunkShader.SetFloat("surfaceLevel", surfaceLevel);
-        chunkShader.Dispatch(kernelIndex, 8, 8, 8);
+        var marchJob = new MarchingCubesJob(vertexBuffer, densityBuffer, triangleBuffer.AsParallelWriter(), resolution, surfaceLevel);
+        JobHandle marchJobHandle = marchJob.Schedule(numVoxels, 128, densityJobHandle);
 
-        // Obtain vertex result
-        int[] numTriangleOut = { 0 };
-        ComputeBuffer.CopyCount(triangleBuffer, numTriangleBuffer, 0);
-        numTriangleBuffer.GetData(numTriangleOut);
-        int numTriangles = numTriangleOut[0];
+        jobQueue.Enqueue(new JobData(chunk, marchJobHandle, triangleBuffer));
+        chunk.dirty = false;
+    }
 
-        Triangle[] triangleList = new Triangle[numTriangles];
-        triangleBuffer.GetData(triangleList, 0, 0, numTriangles);
-
+    void UpdateChunkMesh(JobData jobData) {
         // Generate mesh
-        Mesh mesh = chunk.mesh;
-        Vector3[] vertices = new Vector3[numTriangles * 3];
-        int[] triangles = new int[numTriangles * 3];
+        jobData.jobHandle.Complete();
+        Chunk chunk = jobData.chunk;
+        if (chunk != null && !chunk.IsDestroyed()) {
+            Mesh mesh = chunk.mesh;
+            NativeQueue<Triangle> triangleBuffer = jobData.triangleBuffer;
+            int numTriangles = triangleBuffer.Count;
+            Vector3[] vertices = new Vector3[numTriangles * 3];
+            int[] triangles = new int[numTriangles * 3];
 
-        for (int triIndex = 0; triIndex < numTriangles; triIndex++) {
-            for (int cornerIndex = 0; cornerIndex < 3; cornerIndex++) {
-                int vertIndex = triIndex * 3 + cornerIndex;
-                vertices[vertIndex] = triangleList[triIndex][cornerIndex];
-                triangles[vertIndex] = vertIndex;
+            for (int triIndex = 0; triIndex < numTriangles; triIndex++) {
+                Triangle tri = triangleBuffer.Dequeue();
+                for (int cornerIndex = 0; cornerIndex < 3; cornerIndex++) {
+                    int vertIndex = triIndex * 3 + cornerIndex;
+                    vertices[vertIndex] = tri[cornerIndex];
+                    triangles[vertIndex] = vertIndex;
+                }
             }
+
+            // Set mesh data
+            mesh.Clear();
+            mesh.vertices = vertices;
+            mesh.triangles = triangles;
+            mesh.RecalculateNormals();
+            chunk.UpdateCollider();
         }
 
-        mesh.Clear();
-        mesh.vertices = vertices;
-        mesh.triangles = triangles;
-        mesh.RecalculateNormals();
-        chunk.dirty = false;
-        chunk.UpdateCollider();
+        // Release buffers
+        jobData.ReleaseBuffers();
     }
 
     // If container exists, re-obtain reference. Otherwise, create it.
@@ -183,25 +189,7 @@ public class ChunkGenerator : MonoBehaviour {
 
     void InitChunkDS() {
         chunks = new List<Chunk>();
-    }
-
-    void InitBuffers() {
-        // Values per chunk
-        int numVertsPerAxis = resolution + 1;
-        int numVerts = numVertsPerAxis * numVertsPerAxis * numVertsPerAxis;
-        int numVoxels = resolution * resolution * resolution;
-        int maxTriangleCount = numVoxels * 5;
-
-        if (!Application.isPlaying || vertexBuffer == null || numVerts != vertexBuffer.count) {
-            if (Application.isPlaying) {
-                ReleaseBuffers();
-            }
-
-            // vertex buffer has size of 4 floats to account for density value;
-            vertexBuffer = new ComputeBuffer(numVerts, sizeof(float) * 4);
-            triangleBuffer = new ComputeBuffer(maxTriangleCount, sizeof(float) * 3 * 3, ComputeBufferType.Append);
-            numTriangleBuffer = new ComputeBuffer(1, sizeof(int), ComputeBufferType.Raw);
-        }
+        jobQueue = new Queue<JobData>();
     }
 
     // (Re)Initialize chunks
@@ -236,22 +224,6 @@ public class ChunkGenerator : MonoBehaviour {
         return chunk;
     }
 
-    void ReleaseBuffers() {
-        if (vertexBuffer != null) {
-            vertexBuffer.Release();
-        }
-        if (triangleBuffer != null) {
-            triangleBuffer.Release();
-        }
-        if (numTriangleBuffer != null) {
-            numTriangleBuffer.Release();
-        }
-    }
-
-    void OnDestroy() {
-        ReleaseBuffers();
-    }
-
     void OnDrawGizmos() {
         if (drawChunkGizmos) {
             foreach (Chunk chunk in chunks) {
@@ -266,9 +238,27 @@ public class ChunkGenerator : MonoBehaviour {
                 DrawChunkBoundaries(child);
             }
         } else {
-            Vector3 chunkCenter = GetChunkCenterFromPosition(chunk.position);
+            Vector3 chunkCenter = chunk.position;
             Gizmos.color = chunkGizmosColor;
             Gizmos.DrawWireCube(chunkCenter, Vector3.one * chunk.size);
+        }
+    }
+
+    struct JobData {
+        public Chunk chunk;
+        public JobHandle jobHandle;
+        public NativeQueue<Triangle> triangleBuffer;
+
+        public JobData(Chunk chunk, JobHandle jobHandle, NativeQueue<Triangle> triangleBuffer) {
+            this.chunk = chunk;
+            this.jobHandle = jobHandle;
+            this.triangleBuffer = triangleBuffer;
+        }
+
+        public void ReleaseBuffers() {
+            if (triangleBuffer.IsCreated) {
+                triangleBuffer.Dispose();
+            }
         }
     }
 }

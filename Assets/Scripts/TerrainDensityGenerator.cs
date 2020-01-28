@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 
 public class TerrainDensityGenerator : DensityGenerator {
@@ -24,9 +25,10 @@ public class TerrainDensityGenerator : DensityGenerator {
     [ConditionalHide(nameof(terraceEffect), true, true)]
     public float terraceWeight = 1f;
 
-    public override ComputeBuffer Generate(ComputeBuffer vertexBuffer, int numVertsPerAxis, float chunkSize,
-            float vertSpacing, Vector3 mapSize, Vector3 center, Vector3 offset) {
-        additionalBuffers = new List<ComputeBuffer>();
+
+    public override JobHandle Generate(NativeArray<Vector3> vertexBuffer,
+            NativeArray<float> densityBuffer, int numVertsPerAxis, float chunkSize, float vertSpacing,
+            Vector3 mapSize, Vector3 center, Vector3 offset) {
 
         System.Random gen = new System.Random(seed);
         Vector3[] octaveOffsets = new Vector3[numberOfOctaves];
@@ -37,23 +39,29 @@ public class TerrainDensityGenerator : DensityGenerator {
                 (float)gen.NextDouble() * 2 - 1, (float)gen.NextDouble() * 2 - 1) * offsetRange;
         }
 
-        int kernelIndex = densityShader.FindKernel("CalculateDensity");
-        ComputeBuffer octaveOffsetBuffer = new ComputeBuffer(numberOfOctaves, sizeof(float) * 3);
-        octaveOffsetBuffer.SetData(octaveOffsets);
-        additionalBuffers.Add(octaveOffsetBuffer);
-        densityShader.SetBuffer(kernelIndex, "octaveOffsetBuffer", octaveOffsetBuffer);
-        densityShader.SetVector("terracing", new Vector3(terraceHeight, terraceWeight, terraceEffect ? 1 : 0));
-        densityShader.SetInt("numberOfOctaves", numberOfOctaves);
-        densityShader.SetFloat("lacunarity", lacunarity);
-        densityShader.SetFloat("persistence", persistence);
-        densityShader.SetFloat("scale", scale);
-        densityShader.SetFloat("weight", weight);
-        densityShader.SetFloat("weightMultiplier", weightMultiplier);
-        densityShader.SetFloat("surfaceOffset", surfaceOffset);
-        densityShader.SetFloat("bedrockHeight", bedrockHeight);
-        densityShader.SetFloat("bedrockWeight", bedrockWeight);
-        densityShader.SetBool("solidifyEdges", solidifyEdges);
+        var densityJob = new TerrainDensityJob {
+            vertexBuffer = vertexBuffer,
+            densityBuffer = densityBuffer,
+            octaveOffsetBuffer = new NativeArray<Vector3>(octaveOffsets, Allocator.TempJob),
+            terracing = new Vector3(terraceHeight, terraceWeight, terraceEffect ? 1 : 0),
+            numberOfOctaves = numberOfOctaves,
+            numVertsPerAxis = numVertsPerAxis,
+            chunkSize = chunkSize,
+            vertSpacing = vertSpacing,
+            mapSize = mapSize,
+            center = center,
+            offset = offset,
+            lacunarity = lacunarity,
+            persistence = persistence,
+            scale = scale,
+            weight = weight,
+            weightMultiplier = weightMultiplier,
+            surfaceOffset = surfaceOffset,
+            bedrockHeight = bedrockHeight,
+            bedrockWeight = bedrockWeight,
+            solidifyEdges = solidifyEdges
+        };
 
-        return base.Generate(vertexBuffer, numVertsPerAxis, chunkSize, vertSpacing, mapSize, center, offset);
+        return densityJob.Schedule(numVertsPerAxis * numVertsPerAxis * numVertsPerAxis, 128);
     }
 }
